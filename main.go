@@ -22,6 +22,7 @@ func main() {
 		inputFolder  string
 		outputFolder string
 		showVersion  bool
+		copyMedia    bool
 	)
 
 	// Parse command line arguments
@@ -35,6 +36,8 @@ func main() {
 	
 	flag.BoolVar(&showVersion, "version", false, "Show version information")
 	flag.BoolVar(&showVersion, "v", false, "Show version information")
+	
+	flag.BoolVar(&copyMedia, "copy-media", false, "Copy media files to output directory (default: false, only store references)")
 	
 	flag.Parse()
 
@@ -80,10 +83,12 @@ func main() {
 	fmt.Printf("=======================\n")
 	fmt.Printf("Input folder:  %s\n", absInput)
 	fmt.Printf("Output folder: %s\n", absOutput)
+	fmt.Printf("Copy media:    %v\n", copyMedia)
 	fmt.Printf("\nStarting transformation...\n\n")
 
 	// Initialize and run the processor
 	proc := processor.New(absInput, absOutput)
+	proc.SetCopyMedia(copyMedia)
 	if err := proc.Run(); err != nil {
 		log.Fatalf("Transformation failed: %v", err)
 	}

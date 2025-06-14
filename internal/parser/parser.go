@@ -187,6 +187,20 @@ func ConvertClaudeToStandard(claude models.ClaudeConversation, projects map[stri
 
 // ConvertChatGPTToStandard converts ChatGPT conversation to standard format
 func ConvertChatGPTToStandard(chatgpt models.ChatGPTConversation) models.Conversation {
+	// Debug the specific problematic conversation
+	if chatgpt.ID == "68490016-358c-800c-a8e7-a0965ab83993" {
+		fmt.Printf("DEBUG: Converting target conversation %s\n", chatgpt.ID)
+		fmt.Printf("  Title: %s\n", chatgpt.Title)
+		fmt.Printf("  Mapping size: %d\n", len(chatgpt.Mapping))
+		fmt.Printf("  Current node: %s\n", chatgpt.CurrentNode)
+		
+		// Debug node structure
+		for nodeID, node := range chatgpt.Mapping {
+			hasMessage := node.Message != nil
+			fmt.Printf("  Node %s: parent=%s, children=%v, hasMessage=%v\n", 
+				nodeID, node.Parent, node.Children, hasMessage)
+		}
+	}
 	createdAt := time.Unix(int64(chatgpt.CreateTime), 0)
 	updatedAt := time.Unix(int64(chatgpt.UpdateTime), 0)
 
@@ -207,7 +221,17 @@ func ConvertChatGPTToStandard(chatgpt models.ChatGPTConversation) models.Convers
 		
 		visitedNodes[nodeID] = true
 		node, exists := chatgpt.Mapping[nodeID]
-		if !exists || node.Message == nil {
+		if !exists {
+			return
+		}
+
+		// Always process children first (to maintain order)
+		for _, childID := range node.Children {
+			extractMessages(childID)
+		}
+
+		// Skip nodes without messages, but children were already processed
+		if node.Message == nil {
 			return
 		}
 
@@ -222,12 +246,10 @@ func ConvertChatGPTToStandard(chatgpt models.ChatGPTConversation) models.Convers
 		}
 		
 		contentText := strings.TrimSpace(content.String())
+		
+		// If content is empty, still record the message for completeness
 		if contentText == "" {
-			// Process children
-			for _, childID := range node.Children {
-				extractMessages(childID)
-			}
-			return
+			contentText = "[Empty message]"
 		}
 
 		if strings.Contains(contentText, "```") || strings.Contains(contentText, "`") {
@@ -249,17 +271,31 @@ func ConvertChatGPTToStandard(chatgpt models.ChatGPTConversation) models.Convers
 			Timestamp: msgTime,
 			Metadata:  msg.Metadata,
 		})
-
-		// Process children
-		for _, childID := range node.Children {
-			extractMessages(childID)
-		}
 	}
 
 	// Start from root nodes (nodes with no parent)
+	rootNodes := 0
 	for nodeID, node := range chatgpt.Mapping {
 		if node.Parent == "" {
 			extractMessages(nodeID)
+			rootNodes++
+		}
+	}
+	
+	// If no root nodes found, try starting from current_node or any node with a message
+	if rootNodes == 0 {
+		fmt.Printf("Warning: No root nodes found in conversation %s, trying current_node: %s\n", chatgpt.ID, chatgpt.CurrentNode)
+		if chatgpt.CurrentNode != "" {
+			extractMessages(chatgpt.CurrentNode)
+		} else {
+			// Last resort: try any node with a message
+			fmt.Printf("Warning: No current_node in conversation %s, trying any node with a message\n", chatgpt.ID)
+			for nodeID, node := range chatgpt.Mapping {
+				if node.Message != nil && !visitedNodes[nodeID] {
+					extractMessages(nodeID)
+					break
+				}
+			}
 		}
 	}
 
@@ -270,6 +306,11 @@ func ConvertChatGPTToStandard(chatgpt models.ChatGPTConversation) models.Convers
 				messages[i], messages[j] = messages[j], messages[i]
 			}
 		}
+	}
+
+	// Debug output for the target conversation
+	if chatgpt.ID == "68490016-358c-800c-a8e7-a0965ab83993" {
+		fmt.Printf("DEBUG: Extracted %d messages from target conversation\n", len(messages))
 	}
 
 	// Convert participants map to slice

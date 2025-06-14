@@ -1,0 +1,52 @@
+--- a/internal/parser/chatgpt_parser.go
++++ b/internal/parser/chatgpt_parser.go
+@@ -80,8 +80,11 @@ func (p *ChatGPTParser) parseConversationsStreaming(file *os.File, callback fun
+ 			continue
+ 		}
+ 
+-		// Skip empty conversations
+-		if conv.Title == "" || len(conv.Mapping) == 0 {
++		// Skip conversations with no title, but allow conversations with empty mapping
++		// since the mapping might have been affected by message conversion errors
++		if conv.Title == "" {
++			fmt.Printf("Skipping conversation %s: empty title\n", conv.ID)
++			continue
++		}
++
++		// Check if we can extract any messages from the tree structure
++		if len(conv.Mapping) == 0 {
++			fmt.Printf("Warning: conversation %s has empty mapping after conversion\n", conv.ID)
++			// Don't skip - let the message extraction logic handle it
++		}
++
++		// Additional debug info for problematic conversations
++		if conv.ID == "68490016-358c-800c-a8e7-a0965ab83993" {
++			fmt.Printf("Debug: Processing target conversation %s (mapping size: %d)\n", conv.ID, len(conv.Mapping))
+ 			continue
+ 		}
+ 
+@@ -149,9 +152,11 @@ func (p *ChatGPTParser) convertRawConversation(raw models.ChatGPTConversationRa
+ 		if rawNode.Message != nil {
+ 			message, err := p.convertRawMessage(*rawNode.Message)
+ 			if err != nil {
+-				// Log but don't fail - just skip this message
++				// Log but don't fail - add the node without the message
++				// This preserves the tree structure for navigation
+ 				fmt.Printf("Warning: failed to convert message in node %s: %v\n", nodeID, err)
+-				continue
++				// Don't continue here - we still want to add the node to preserve tree structure
++				// The node.Message will remain nil
+ 			}
++			} else {
+ 			node.Message = &message
+ 		}
+ 
+@@ -215,6 +220,11 @@ func (p *ChatGPTParser) convertRawMessage(raw models.ChatGPTMessageRaw) (models
+ 	message.Content = content
+ 	return message, nil
+ }
++
++		// Additional validation for the target conversation
++		if raw.ID == "68490016-358c-800c-a8e7-a0965ab83993" {
++			fmt.Printf("Debug: Converting raw message %s (parts type: %T)\n", raw.ID, raw.Content.Parts)
++		}
