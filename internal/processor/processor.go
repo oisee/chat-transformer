@@ -21,6 +21,8 @@ type Processor struct {
 	chatgptParser *parser.ChatGPTParser
 	indexer       *indexer.Indexer
 	copyMedia     bool
+	claudeOnly    bool
+	chatgptOnly   bool
 }
 
 // New creates a new processor instance
@@ -32,12 +34,20 @@ func New(inputPath, outputPath string) *Processor {
 		chatgptParser: parser.NewChatGPTParser(inputPath),
 		indexer:       indexer.New(outputPath),
 		copyMedia:     false, // default to not copying media
+		claudeOnly:    false,
+		chatgptOnly:   false,
 	}
 }
 
 // SetCopyMedia sets whether to copy media files
 func (p *Processor) SetCopyMedia(copy bool) {
 	p.copyMedia = copy
+}
+
+// SetPlatformModes sets which platforms to process
+func (p *Processor) SetPlatformModes(claudeOnly, chatgptOnly bool) {
+	p.claudeOnly = claudeOnly
+	p.chatgptOnly = chatgptOnly
 }
 
 // Run executes the transformation process
@@ -49,30 +59,42 @@ func (p *Processor) Run() error {
 		return fmt.Errorf("failed to create directory structure: %w", err)
 	}
 
-	// Process Claude exports
-	fmt.Println("Processing Claude projects...")
-	projectStats, err := p.processClaudeProjects()
-	if err != nil {
-		fmt.Printf("Warning: Claude project processing failed: %v\n", err)
+	var projectStats, claudeStats, chatgptStats ProcessingStats
+
+	// Process Claude exports (unless ChatGPT-only mode)
+	if !p.chatgptOnly {
+		fmt.Println("Processing Claude projects...")
+		var err error
+		projectStats, err = p.processClaudeProjects()
+		if err != nil {
+			fmt.Printf("Warning: Claude project processing failed: %v\n", err)
+		} else {
+			fmt.Printf("✓ Processed %d Claude projects\n", projectStats.ProjectCount)
+		}
+
+		fmt.Println("Processing Claude conversations...")
+		claudeStats, err = p.processClaudeConversations()
+		if err != nil {
+			fmt.Printf("Warning: Claude processing failed: %v\n", err)
+		} else {
+			fmt.Printf("✓ Processed %d Claude conversations\n", claudeStats.ConversationCount)
+		}
 	} else {
-		fmt.Printf("✓ Processed %d Claude projects\n", projectStats.ProjectCount)
+		fmt.Println("Skipping Claude processing (ChatGPT-only mode)")
 	}
 
-	fmt.Println("Processing Claude conversations...")
-	claudeStats, err := p.processClaudeConversations()
-	if err != nil {
-		fmt.Printf("Warning: Claude processing failed: %v\n", err)
+	// Process ChatGPT exports (unless Claude-only mode)
+	if !p.claudeOnly {
+		fmt.Println("Processing ChatGPT conversations...")
+		var err error
+		chatgptStats, err = p.processChatGPTConversations()
+		if err != nil {
+			fmt.Printf("Warning: ChatGPT processing failed: %v\n", err)
+		} else {
+			fmt.Printf("✓ Processed %d ChatGPT conversations\n", chatgptStats.ConversationCount)
+		}
 	} else {
-		fmt.Printf("✓ Processed %d Claude conversations\n", claudeStats.ConversationCount)
-	}
-
-	// Process ChatGPT exports
-	fmt.Println("Processing ChatGPT conversations...")
-	chatgptStats, err := p.processChatGPTConversations()
-	if err != nil {
-		fmt.Printf("Warning: ChatGPT processing failed: %v\n", err)
-	} else {
-		fmt.Printf("✓ Processed %d ChatGPT conversations\n", chatgptStats.ConversationCount)
+		fmt.Println("Skipping ChatGPT processing (Claude-only mode)")
 	}
 
 	// Generate indexes

@@ -23,6 +23,8 @@ func main() {
 		outputFolder string
 		showVersion  bool
 		copyMedia    bool
+		claudeOnly   bool
+		chatgptOnly  bool
 	)
 
 	// Parse command line arguments
@@ -39,6 +41,13 @@ func main() {
 	
 	flag.BoolVar(&copyMedia, "copy-media", false, "Copy media files to output directory (default: false, only store references)")
 	
+	flag.BoolVar(&claudeOnly, "claude", false, "Process only Claude conversations")
+	flag.BoolVar(&claudeOnly, "c", false, "Process only Claude conversations")
+	
+	flag.BoolVar(&chatgptOnly, "chatgpt", false, "Process only ChatGPT conversations")
+	flag.BoolVar(&chatgptOnly, "gpt", false, "Process only ChatGPT conversations")
+	flag.BoolVar(&chatgptOnly, "g", false, "Process only ChatGPT conversations")
+	
 	flag.Parse()
 
 	// Show version if requested
@@ -47,6 +56,11 @@ func main() {
 		fmt.Printf("Built: %s\n", BuildTime)
 		fmt.Printf("Commit: %s\n", GitCommit)
 		return
+	}
+
+	// Validate mutually exclusive flags
+	if claudeOnly && chatgptOnly {
+		log.Fatalf("Cannot specify both --claude and --chatgpt flags. Choose one platform to process.")
 	}
 
 	// Default paths if not provided
@@ -79,16 +93,26 @@ func main() {
 		log.Fatalf("Failed to create output folder: %v", err)
 	}
 
+	// Determine what to process
+	platformMode := "both platforms"
+	if claudeOnly {
+		platformMode = "Claude only"
+	} else if chatgptOnly {
+		platformMode = "ChatGPT only"
+	}
+
 	fmt.Printf("Chat Export Transformer\n")
 	fmt.Printf("=======================\n")
 	fmt.Printf("Input folder:  %s\n", absInput)
 	fmt.Printf("Output folder: %s\n", absOutput)
 	fmt.Printf("Copy media:    %v\n", copyMedia)
+	fmt.Printf("Platform mode: %s\n", platformMode)
 	fmt.Printf("\nStarting transformation...\n\n")
 
 	// Initialize and run the processor
 	proc := processor.New(absInput, absOutput)
 	proc.SetCopyMedia(copyMedia)
+	proc.SetPlatformModes(claudeOnly, chatgptOnly)
 	if err := proc.Run(); err != nil {
 		log.Fatalf("Transformation failed: %v", err)
 	}
