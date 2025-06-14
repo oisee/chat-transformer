@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"chat-transformer/internal/models"
@@ -14,6 +15,7 @@ type Indexer struct {
 	outputPath    string
 	conversations []models.ConversationMetadata
 	topics        map[string][]string // topic -> conversation IDs
+	mutex         sync.RWMutex        // protects conversations and topics maps
 }
 
 // New creates a new indexer instance
@@ -27,6 +29,9 @@ func New(outputPath string) *Indexer {
 
 // AddConversation adds a conversation to the index
 func (idx *Indexer) AddConversation(metadata models.ConversationMetadata) {
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+	
 	idx.conversations = append(idx.conversations, metadata)
 	
 	// Add to topic index
@@ -60,6 +65,9 @@ func (idx *Indexer) GenerateIndexes() error {
 
 // generateConversationIndex creates the main conversation index
 func (idx *Indexer) generateConversationIndex() error {
+	idx.mutex.RLock()
+	defer idx.mutex.RUnlock()
+	
 	// Claude index
 	claudeConvs := make([]models.ConversationMetadata, 0)
 	chatgptConvs := make([]models.ConversationMetadata, 0)
@@ -100,6 +108,9 @@ func (idx *Indexer) generateConversationIndex() error {
 
 // generateTopicIndex creates topic-based indexes
 func (idx *Indexer) generateTopicIndex() error {
+	idx.mutex.RLock()
+	defer idx.mutex.RUnlock()
+	
 	topicIndex := models.TopicIndex{
 		Topics:      idx.topics,
 		LastUpdated: time.Now(),
@@ -110,6 +121,9 @@ func (idx *Indexer) generateTopicIndex() error {
 
 // generateTimeline creates a chronological timeline
 func (idx *Indexer) generateTimeline() error {
+	idx.mutex.RLock()
+	defer idx.mutex.RUnlock()
+	
 	// Sort conversations by date
 	sorted := make([]models.ConversationMetadata, len(idx.conversations))
 	copy(sorted, idx.conversations)

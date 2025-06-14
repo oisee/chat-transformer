@@ -7,13 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"chat-transformer/internal/models"
+)
+
+const (
+	// Number of parallel workers for conversation processing
+	ConversationWorkers = 25
 )
 
 // ChatGPTParser handles parsing of ChatGPT exports with streaming support
 type ChatGPTParser struct {
 	inputPath string
+}
+
+// conversationJob represents a conversation to be processed
+type conversationJob struct {
+	rawConv models.ChatGPTConversationRaw
+	index   int
 }
 
 // NewChatGPTParser creates a new ChatGPT parser instance
@@ -69,35 +81,8 @@ func (p *ChatGPTParser) parseConversationsStreaming(file *os.File, callback func
 
 	fmt.Printf("Successfully parsed %d ChatGPT conversations\n", len(conversations))
 
-	// Process each conversation
-	processedCount := 0
-	for i, rawConv := range conversations {
-		// Convert raw conversation to standard format
-		conv, err := p.convertRawConversation(rawConv)
-		if err != nil {
-			fmt.Printf("Warning: failed to convert conversation %d: %v\n", i, err)
-			continue
-		}
-
-		// Note: We no longer skip conversations with empty titles since we generate fallback titles
-
-		// Warn about empty mappings but don't skip - let the message extraction logic handle it
-		if len(conv.Mapping) == 0 {
-			fmt.Printf("Warning: conversation %s has empty mapping after conversion\n", conv.ID)
-		}
-
-		if err := callback(conv); err != nil {
-			fmt.Printf("Warning: callback failed for ChatGPT conversation %s: %v\n", conv.ID, err)
-		}
-		
-		processedCount++
-		if processedCount%100 == 0 {
-			fmt.Printf("Processed %d/%d conversations...\n", processedCount, len(conversations))
-		}
-	}
-
-	fmt.Printf("Successfully processed %d valid conversations\n", processedCount)
-	return nil
+	// Process conversations in parallel
+	return p.processConversationsParallel(conversations, callback)
 }
 
 // parseConversationsStandard handles normally sized files
@@ -125,6 +110,123 @@ func (p *ChatGPTParser) parseConversationsStandard(file *os.File, callback func(
 	}
 
 	return nil
+}
+
+// processConversationsParallel processes conversations using parallel workers
+func (p *ChatGPTParser) processConversationsParallel(conversations []models.ChatGPTConversationRaw, callback func(models.ChatGPTConversation) error) error {
+	totalConversations := len(conversations)
+	if totalConversations == 0 {
+		return nil
+	}
+
+	// Create channels for job distribution and progress tracking
+	jobChan := make(chan conversationJob, 100) // Buffered channel
+	resultChan := make(chan error, totalConversations)
+	progressChan := make(chan int, totalConversations)
+
+	// Determine number of workers
+	numWorkers := ConversationWorkers
+	if totalConversations < numWorkers {
+		numWorkers = totalConversations
+	}
+
+	fmt.Printf("Processing conversations with %d workers...\n", numWorkers)
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go p.conversationWorker(&wg, jobChan, resultChan, progressChan, callback)
+	}
+
+	// Start progress reporter
+	var progressWg sync.WaitGroup
+	progressWg.Add(1)
+	go p.progressReporter(&progressWg, progressChan, totalConversations)
+
+	// Send jobs to workers
+	for i, rawConv := range conversations {
+		jobChan <- conversationJob{
+			rawConv: rawConv,
+			index:   i,
+		}
+	}
+	close(jobChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+	close(resultChan)
+	close(progressChan)
+
+	// Wait for progress reporter to finish
+	progressWg.Wait()
+
+	// Count successful and failed conversions
+	successCount := 0
+	var errors []error
+	for err := range resultChan {
+		if err != nil {
+			errors = append(errors, err)
+		} else {
+			successCount++
+		}
+	}
+
+	fmt.Printf("Successfully processed %d valid conversations\n", successCount)
+	if len(errors) > 0 {
+		fmt.Printf("Warning: %d conversations failed to process\n", len(errors))
+		// Print first few errors as examples
+		for i, err := range errors {
+			if i >= 5 { // Limit to first 5 errors to avoid spam
+				fmt.Printf("... and %d more errors\n", len(errors)-5)
+				break
+			}
+			fmt.Printf("  - %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// conversationWorker processes conversation jobs from the job channel
+func (p *ChatGPTParser) conversationWorker(wg *sync.WaitGroup, jobChan <-chan conversationJob, resultChan chan<- error, progressChan chan<- int, callback func(models.ChatGPTConversation) error) {
+	defer wg.Done()
+
+	for job := range jobChan {
+		var err error
+
+		// Convert raw conversation to standard format
+		conv, convErr := p.convertRawConversation(job.rawConv)
+		if convErr != nil {
+			err = fmt.Errorf("failed to convert conversation %d: %w", job.index, convErr)
+		} else {
+			// Warn about empty mappings but don't fail
+			if len(conv.Mapping) == 0 {
+				fmt.Printf("Warning: conversation %s has empty mapping after conversion\n", conv.ID)
+			}
+
+			// Call the callback function
+			if callbackErr := callback(conv); callbackErr != nil {
+				err = fmt.Errorf("callback failed for conversation %s: %w", conv.ID, callbackErr)
+			}
+		}
+
+		resultChan <- err
+		progressChan <- 1 // Signal one conversation processed
+	}
+}
+
+// progressReporter reports progress of conversation processing
+func (p *ChatGPTParser) progressReporter(wg *sync.WaitGroup, progressChan <-chan int, total int) {
+	defer wg.Done()
+
+	processed := 0
+	for range progressChan {
+		processed++
+		if processed%100 == 0 || processed == total {
+			fmt.Printf("Processed %d/%d conversations...\n", processed, total)
+		}
+	}
 }
 
 // convertRawConversation converts the raw ChatGPT format to our standard format
