@@ -10,32 +10,37 @@ import (
 	"chat-transformer/internal/indexer"
 	"chat-transformer/internal/models"
 	"chat-transformer/internal/parser"
+	"chat-transformer/internal/renderer"
 	"chat-transformer/internal/utils"
 )
 
 // Processor handles the main transformation logic
 type Processor struct {
-	inputPath     string
-	outputPath    string
-	parser        *parser.Parser
-	chatgptParser *parser.ChatGPTParser
-	indexer       *indexer.Indexer
-	copyMedia     bool
-	claudeOnly    bool
-	chatgptOnly   bool
+	inputPath      string
+	outputPath     string
+	parser         *parser.Parser
+	chatgptParser  *parser.ChatGPTParser
+	indexer        *indexer.Indexer
+	renderer       *renderer.MarkdownRenderer
+	copyMedia      bool
+	claudeOnly     bool
+	chatgptOnly    bool
+	renderMarkdown bool
 }
 
 // New creates a new processor instance
 func New(inputPath, outputPath string) *Processor {
 	return &Processor{
-		inputPath:     inputPath,
-		outputPath:    outputPath,
-		parser:        parser.New(inputPath),
-		chatgptParser: parser.NewChatGPTParser(inputPath),
-		indexer:       indexer.New(outputPath),
-		copyMedia:     false, // default to not copying media
-		claudeOnly:    false,
-		chatgptOnly:   false,
+		inputPath:      inputPath,
+		outputPath:     outputPath,
+		parser:         parser.New(inputPath),
+		chatgptParser:  parser.NewChatGPTParser(inputPath),
+		indexer:        indexer.New(outputPath),
+		renderer:       renderer.New(outputPath),
+		copyMedia:      false, // default to not copying media
+		claudeOnly:     false,
+		chatgptOnly:    false,
+		renderMarkdown: false,
 	}
 }
 
@@ -48,6 +53,11 @@ func (p *Processor) SetCopyMedia(copy bool) {
 func (p *Processor) SetPlatformModes(claudeOnly, chatgptOnly bool) {
 	p.claudeOnly = claudeOnly
 	p.chatgptOnly = chatgptOnly
+}
+
+// SetRenderMarkdown sets whether to render conversations to markdown
+func (p *Processor) SetRenderMarkdown(render bool) {
+	p.renderMarkdown = render
 }
 
 // Run executes the transformation process
@@ -103,6 +113,13 @@ func (p *Processor) Run() error {
 		return fmt.Errorf("failed to generate indexes: %w", err)
 	}
 	fmt.Println("✓ Generated search indexes")
+
+	// Render to markdown if requested
+	if p.renderMarkdown {
+		if err := p.renderer.RenderAll(); err != nil {
+			fmt.Printf("Warning: markdown rendering failed: %v\n", err)
+		}
+	}
 
 	// Generate report
 	totalStats := ProcessingStats{

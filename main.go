@@ -19,12 +19,13 @@ var (
 
 func main() {
 	var (
-		inputFolder  string
-		outputFolder string
-		showVersion  bool
-		copyMedia    bool
-		claudeOnly   bool
-		chatgptOnly  bool
+		inputFolder     string
+		outputFolder    string
+		showVersion     bool
+		copyMedia       bool
+		claudeOnly      bool
+		chatgptOnly     bool
+		renderMarkdown  bool
 	)
 
 	// Parse command line arguments
@@ -47,6 +48,9 @@ func main() {
 	flag.BoolVar(&chatgptOnly, "chatgpt", false, "Process only ChatGPT conversations")
 	flag.BoolVar(&chatgptOnly, "gpt", false, "Process only ChatGPT conversations")
 	flag.BoolVar(&chatgptOnly, "g", false, "Process only ChatGPT conversations")
+	
+	flag.BoolVar(&renderMarkdown, "render-markdown", false, "Render JSON conversations to readable markdown files")
+	flag.BoolVar(&renderMarkdown, "md", false, "Render JSON conversations to readable markdown files")
 	
 	flag.Parse()
 
@@ -103,16 +107,18 @@ func main() {
 
 	fmt.Printf("Chat Export Transformer\n")
 	fmt.Printf("=======================\n")
-	fmt.Printf("Input folder:  %s\n", absInput)
-	fmt.Printf("Output folder: %s\n", absOutput)
-	fmt.Printf("Copy media:    %v\n", copyMedia)
-	fmt.Printf("Platform mode: %s\n", platformMode)
+	fmt.Printf("Input folder:     %s\n", absInput)
+	fmt.Printf("Output folder:    %s\n", absOutput)
+	fmt.Printf("Copy media:       %v\n", copyMedia)
+	fmt.Printf("Platform mode:    %s\n", platformMode)
+	fmt.Printf("Render markdown:  %v\n", renderMarkdown)
 	fmt.Printf("\nStarting transformation...\n\n")
 
 	// Initialize and run the processor
 	proc := processor.New(absInput, absOutput)
 	proc.SetCopyMedia(copyMedia)
 	proc.SetPlatformModes(claudeOnly, chatgptOnly)
+	proc.SetRenderMarkdown(renderMarkdown)
 	if err := proc.Run(); err != nil {
 		log.Fatalf("Transformation failed: %v", err)
 	}
