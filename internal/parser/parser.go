@@ -123,29 +123,29 @@ func ConvertClaudeToStandard(claude models.ClaudeConversation, projects map[stri
 	hasCode := false
 	hasMedia := false
 
-	for _, msg := range claude.Messages {
+	for _, msg := range claude.ChatMessages {
 		msgTime, _ := time.Parse(time.RFC3339, msg.CreatedAt)
 		
-		// Extract text content
-		var content strings.Builder
+		// Use the text field directly
+		contentText := msg.Text
+		
+		// Also check content array for additional content types
 		for _, c := range msg.Content {
-			if c.Type == "text" {
-				content.WriteString(c.Text)
-			} else if c.Type == "image" {
+			if c.Type == "image" {
 				hasMedia = true
-				content.WriteString(fmt.Sprintf("[Image: %s]", c.URL))
+				contentText += fmt.Sprintf(" [Image: %s]", c.URL)
 			}
 		}
 
-		contentText := content.String()
 		if strings.Contains(contentText, "```") || strings.Contains(contentText, "`") {
 			hasCode = true
 		}
 
-		author := msg.Role
+		// Map sender to standard format
+		author := msg.Sender
 		if author == "assistant" {
 			author = "Claude"
-		} else if author == "user" {
+		} else if author == "human" {
 			author = "User"
 		}
 		participants[author] = true

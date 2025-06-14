@@ -42,14 +42,15 @@ type ClaudeConversation struct {
 	CreatedAt      string                 `json:"created_at"`
 	UpdatedAt      string                 `json:"updated_at"`
 	ProjectUUID    string                 `json:"project_uuid,omitempty"`
-	Messages       []ClaudeMessage        `json:"messages"`
+	ChatMessages   []ClaudeMessage        `json:"chat_messages"`
 	Settings       map[string]interface{} `json:"settings,omitempty"`
 }
 
 // ClaudeMessage represents a single message in Claude format
 type ClaudeMessage struct {
 	UUID      string                 `json:"uuid"`
-	Role      string                 `json:"role"`
+	Text      string                 `json:"text"`
+	Sender    string                 `json:"sender"`
 	Content   []ClaudeContent        `json:"content"`
 	CreatedAt string                 `json:"created_at"`
 	UpdatedAt string                 `json:"updated_at"`
