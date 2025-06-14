@@ -6,13 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"chat-transformer/internal/models"
+)
+
+const (
+	// Number of parallel workers for markdown rendering
+	MaxWorkers = 50
 )
 
 // MarkdownRenderer handles rendering JSON conversations to markdown
 type MarkdownRenderer struct {
 	outputPath string
+}
+
+// renderJob represents a file to be rendered
+type renderJob struct {
+	inputPath  string
+	outputPath string
+	jobType    string // "conversation" or "project"
 }
 
 // New creates a new markdown renderer instance
@@ -69,24 +82,19 @@ func (r *MarkdownRenderer) createMarkdownDirectories() error {
 	return nil
 }
 
-// renderClaudeConversations renders all Claude conversation JSON files to markdown
+// renderClaudeConversations renders all Claude conversation JSON files to markdown using parallel processing
 func (r *MarkdownRenderer) renderClaudeConversations() error {
 	chatsPath := filepath.Join(r.outputPath, "claude", "chats")
 	
-	return filepath.Walk(chatsPath, func(path string, info os.FileInfo, err error) error {
+	// Collect all conversation files
+	var jobs []renderJob
+	err := filepath.Walk(chatsPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if !strings.HasSuffix(path, ".json") {
 			return nil
-		}
-
-		// Read conversation JSON
-		var conv models.Conversation
-		if err := r.readJSON(path, &conv); err != nil {
-			fmt.Printf("Warning: failed to read conversation %s: %v\n", path, err)
-			return nil // Continue processing other files
 		}
 
 		// Generate markdown output path
@@ -98,34 +106,36 @@ func (r *MarkdownRenderer) renderClaudeConversations() error {
 		mdPath := strings.Replace(relPath, ".json", ".md", 1)
 		outputPath := filepath.Join(r.outputPath, "claude", "chats-md", mdPath)
 
-		// Ensure output directory exists
-		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-			return err
-		}
+		jobs = append(jobs, renderJob{
+			inputPath:  path,
+			outputPath: outputPath,
+			jobType:    "conversation",
+		})
 
-		// Render to markdown
-		return r.renderConversationToMarkdown(conv, outputPath)
+		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Process jobs in parallel
+	return r.processJobsParallel(jobs)
 }
 
-// renderChatGPTConversations renders all ChatGPT conversation JSON files to markdown
+// renderChatGPTConversations renders all ChatGPT conversation JSON files to markdown using parallel processing
 func (r *MarkdownRenderer) renderChatGPTConversations() error {
 	chatsPath := filepath.Join(r.outputPath, "chatgpt", "chats")
 	
-	return filepath.Walk(chatsPath, func(path string, info os.FileInfo, err error) error {
+	// Collect all conversation files
+	var jobs []renderJob
+	err := filepath.Walk(chatsPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if !strings.HasSuffix(path, ".json") {
 			return nil
-		}
-
-		// Read conversation JSON
-		var conv models.Conversation
-		if err := r.readJSON(path, &conv); err != nil {
-			fmt.Printf("Warning: failed to read conversation %s: %v\n", path, err)
-			return nil // Continue processing other files
 		}
 
 		// Generate markdown output path
@@ -137,34 +147,36 @@ func (r *MarkdownRenderer) renderChatGPTConversations() error {
 		mdPath := strings.Replace(relPath, ".json", ".md", 1)
 		outputPath := filepath.Join(r.outputPath, "chatgpt", "chats-md", mdPath)
 
-		// Ensure output directory exists
-		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-			return err
-		}
+		jobs = append(jobs, renderJob{
+			inputPath:  path,
+			outputPath: outputPath,
+			jobType:    "conversation",
+		})
 
-		// Render to markdown
-		return r.renderConversationToMarkdown(conv, outputPath)
+		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Process jobs in parallel
+	return r.processJobsParallel(jobs)
 }
 
-// renderClaudeProjects renders all Claude project JSON files to markdown
+// renderClaudeProjects renders all Claude project JSON files to markdown using parallel processing
 func (r *MarkdownRenderer) renderClaudeProjects() error {
 	projectsPath := filepath.Join(r.outputPath, "claude", "projects")
 	
-	return filepath.Walk(projectsPath, func(path string, info os.FileInfo, err error) error {
+	// Collect all project files
+	var jobs []renderJob
+	err := filepath.Walk(projectsPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if !strings.HasSuffix(path, "project.json") {
 			return nil
-		}
-
-		// Read project JSON
-		var project models.ClaudeProject
-		if err := r.readJSON(path, &project); err != nil {
-			fmt.Printf("Warning: failed to read project %s: %v\n", path, err)
-			return nil // Continue processing other files
 		}
 
 		// Generate markdown output path
@@ -176,14 +188,21 @@ func (r *MarkdownRenderer) renderClaudeProjects() error {
 		
 		outputPath := filepath.Join(r.outputPath, "claude", "projects-md", relPath, "project.md")
 
-		// Ensure output directory exists
-		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-			return err
-		}
+		jobs = append(jobs, renderJob{
+			inputPath:  path,
+			outputPath: outputPath,
+			jobType:    "project",
+		})
 
-		// Render to markdown
-		return r.renderProjectToMarkdown(project, outputPath)
+		return nil
 	})
+
+	if err != nil {
+		return err
+	}
+
+	// Process jobs in parallel
+	return r.processJobsParallel(jobs)
 }
 
 // renderConversationToMarkdown renders a conversation to markdown format
@@ -237,9 +256,8 @@ func (r *MarkdownRenderer) renderConversationToMarkdown(conv models.Conversation
 			roleSeparator = fmt.Sprintf(">>>%s:>>>", strings.ToLower(msg.Author))
 		}
 
-		// Write message separator and timestamp
-		fmt.Fprintf(file, "%s\n", roleSeparator)
-		fmt.Fprintf(file, "*%s*\n\n", msg.Timestamp.Format("2006-01-02 15:04:05"))
+		// Write message separator with inline timestamp
+		fmt.Fprintf(file, "%s    *%s*\n\n", roleSeparator, msg.Timestamp.Format("2006-01-02 15:04:05"))
 
 		// Write message content
 		content := strings.TrimSpace(msg.Content)
@@ -305,6 +323,95 @@ func (r *MarkdownRenderer) renderProjectToMarkdown(project models.ClaudeProject,
 	}
 
 	return nil
+}
+
+// processJobsParallel processes render jobs using a worker pool
+func (r *MarkdownRenderer) processJobsParallel(jobs []renderJob) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	// Create job channel and result channel
+	jobChan := make(chan renderJob, len(jobs))
+	resultChan := make(chan error, len(jobs))
+
+	// Determine number of workers (don't exceed job count)
+	numWorkers := MaxWorkers
+	if len(jobs) < numWorkers {
+		numWorkers = len(jobs)
+	}
+
+	// Start workers
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go r.worker(&wg, jobChan, resultChan)
+	}
+
+	// Send jobs to workers
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+	close(resultChan)
+
+	// Check for errors
+	var errors []error
+	for err := range resultChan {
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	if len(errors) > 0 {
+		// Log warnings but don't fail completely
+		for _, err := range errors {
+			fmt.Printf("Warning: markdown rendering error: %v\n", err)
+		}
+	}
+
+	fmt.Printf("✓ Rendered %d files to markdown using %d workers\n", len(jobs), numWorkers)
+	return nil
+}
+
+// worker processes render jobs from the job channel
+func (r *MarkdownRenderer) worker(wg *sync.WaitGroup, jobChan <-chan renderJob, resultChan chan<- error) {
+	defer wg.Done()
+
+	for job := range jobChan {
+		err := r.processJob(job)
+		resultChan <- err
+	}
+}
+
+// processJob processes a single render job
+func (r *MarkdownRenderer) processJob(job renderJob) error {
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(job.outputPath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory for %s: %w", job.outputPath, err)
+	}
+
+	switch job.jobType {
+	case "conversation":
+		var conv models.Conversation
+		if err := r.readJSON(job.inputPath, &conv); err != nil {
+			return fmt.Errorf("failed to read conversation %s: %w", job.inputPath, err)
+		}
+		return r.renderConversationToMarkdown(conv, job.outputPath)
+	
+	case "project":
+		var project models.ClaudeProject
+		if err := r.readJSON(job.inputPath, &project); err != nil {
+			return fmt.Errorf("failed to read project %s: %w", job.inputPath, err)
+		}
+		return r.renderProjectToMarkdown(project, job.outputPath)
+	
+	default:
+		return fmt.Errorf("unknown job type: %s", job.jobType)
+	}
 }
 
 // readJSON reads and unmarshals a JSON file
