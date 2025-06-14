@@ -79,12 +79,7 @@ func (p *ChatGPTParser) parseConversationsStreaming(file *os.File, callback func
 			continue
 		}
 
-		// Skip conversations with no title, but allow conversations with empty mapping
-		// since the mapping might have been affected by message conversion errors
-		if conv.Title == "" {
-			fmt.Printf("Skipping conversation %s: empty title\n", conv.ID)
-			continue
-		}
+		// Note: We no longer skip conversations with empty titles since we generate fallback titles
 
 		// Warn about empty mappings but don't skip - let the message extraction logic handle it
 		if len(conv.Mapping) == 0 {
@@ -134,9 +129,15 @@ func (p *ChatGPTParser) parseConversationsStandard(file *os.File, callback func(
 
 // convertRawConversation converts the raw ChatGPT format to our standard format
 func (p *ChatGPTParser) convertRawConversation(raw models.ChatGPTConversationRaw) (models.ChatGPTConversation, error) {
+	// Use GUID as fallback title if title is empty
+	title := raw.Title
+	if title == "" {
+		title = fmt.Sprintf("Conversation-%s", raw.ID[:8]) // Use first 8 chars of GUID
+	}
+	
 	conv := models.ChatGPTConversation{
 		ID:             raw.ID,
-		Title:          raw.Title,
+		Title:          title,
 		CreateTime:     raw.CreateTime,
 		UpdateTime:     raw.UpdateTime,
 		Mapping:        make(map[string]models.ChatGPTNode),
